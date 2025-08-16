@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Corrida Enduro Master</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #333; /* Cor de fundo escura para destacar o jogo */
+            color: white;
+            overflow: hidden; /* Evitar barras de rolagem indesejadas */
+        }
+        #gameContainer {
+            border: 5px solid #555;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            position: relative; /* Para posicionar elementos internos como a mensagem de game over */
+            background-color: #000; /* Fundo do container do canvas */
+        }
+        canvas {
+            display: block; /* Remove espaço extra abaixo do canvas */
+            border-radius: 5px; /* Bordas arredondadas para o canvas */
+        }
+        .game-info {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background-color: rgba(0,0,0,0.6);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .game-info p {
+            margin: 5px 0;
+            font-size: 1.1em;
+        }
+        .game-info span {
+            font-weight: bold;
+            color: #4ade80; /* Verde Tailwind */
+        }
+        #gameOverMessage, #startMessage {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            z-index: 100; /* Para ficar sobre o canvas */
+            font-size: 1.5em;
+            box-shadow: 0 0 15px rgba(255,255,255,0.3);
+        }
+        #gameOverMessage button, #startMessage button {
+            background-color: #4CAF50; /* Verde */
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: background-color 0.3s ease;
+        }
+        #gameOverMessage button:hover, #startMessage button:hover {
+            background-color: #45a049;
+        }
+        #controlsInfo {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #ccc;
+        }
+        /* Estilos para os botões de controle em dispositivos móveis */
+        #mobileControls {
+            display: none; /* Escondido por padrão, mostrado via JS em mobile */
+            justify-content: space-around;
+            width: 100%;
+            max-width: 300px; /* Largura máxima para os controles */
+            margin-top: 15px;
+        }
+        #mobileControls button {
+            background-color: #4a5568; /* Cinza escuro Tailwind */
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.2em;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+         #mobileControls button:active {
+            background-color: #2d3748; /* Cinza mais escuro Tailwind */
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="startMessage">
+            <p>Bem-vindo ao Enduro Master!</p>
+            <p>Use as setas ⬅️ e ➡️ para mover.</p>
+            <button id="startButton">Iniciar Jogo</button>
+        </div>
+        <div id="gameOverMessage" style="display: none;">
+            <p>Fim de Jogo!</p>
+            <p>Sua Pontuação: <span id="finalScore">0</span></p>
+            <button id="restartButton">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <div class="game-info">
+        <p>Pontuação: <span id="score">0</span></p>
+        <p>Velocidade: <span id="speed">0</span> km/h</p>
+        <p>Ambiente: <span id="environment">Pista Verde</span></p>
+    </div>
+    <div id="controlsInfo">
+        Controles: Setas Esquerda/Direita ou Toque na tela (Esquerda/Direita)
+    </div>
+
+    <div id="mobileControls">
+        <button id="moveLeftButton">⬅️</button>
+        <button id="moveRightButton">➡️</button>
+    </div>
+
+    <script>
+        // --- Configurações do Jogo ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const scoreDisplay = document.getElementById('score');
+        const speedDisplay = document.getElementById('speed');
+        const environmentDisplay = document.getElementById('environment');
+        const gameOverMessage = document.getElementById('gameOverMessage');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+        const startMessage = document.getElementById('startMessage');
+        const startButton = document.getElementById('startButton');
+        const mobileControls = document.getElementById('mobileControls');
+        const moveLeftButton = document.getElementById('moveLeftButton');
+        const moveRightButton = document.getElementById('moveRightButton');
+
+        let gameWidth, gameHeight; // Serão definidos em resizeCanvas
+
+        // --- Variáveis do Jogo ---
+        let playerCar;
+        let obstacles = [];
+        let roadLines = [];
+        let score = 0;
+        let gameSpeed = 2; // Velocidade inicial do jogo (pixels por frame)
+        let baseSpeed = 2;
+        let maxSpeed = 10;
+        let acceleration = 0.005; // Aceleração gradual
+        let roadWidthMultiplier = 0.8; // 80% da largura do canvas
+        let roadShoulderWidth = 0.05; // 5% da largura do canvas para cada acostamento
+        let gameRunning = false;
+        let currentEnvironment = 'green'; // 'green', 'rain', 'fog', 'desert', 'night'
+        let environmentTimer = 0;
+        const environmentDuration = 2000; // Frames para mudar de ambiente (aprox. 30-35 segundos a 60FPS)
+
+        // --- Entidades do Jogo ---
+        class Car {
+            constructor(x, y, width, height, color, isPlayer = true) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.color = color;
+                this.isPlayer = isPlayer;
+                this.speedX = 0; // Velocidade horizontal para movimento suave
+                this.maxSpeedX = 5; // Velocidade máxima de movimento lateral
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+
+                // Detalhes do carro (janelas, faróis - simplificado)
+                ctx.fillStyle = 'rgba(0,0,0,0.3)'; // Janelas escuras
+                ctx.fillRect(this.x + this.width * 0.15, this.y + this.height * 0.1, this.width * 0.7, this.height * 0.3); // Para-brisa
+                ctx.fillRect(this.x + this.width * 0.15, this.y + this.height * 0.5, this.width * 0.7, this.height * 0.3); // Janela traseira (se aplicável)
+
+
+                if (this.isPlayer) {
+                     // Faróis acesos (especialmente útil para o modo noturno)
+                    if (currentEnvironment === 'night' || currentEnvironment === 'rain' || currentEnvironment === 'fog') {
+                        ctx.fillStyle = 'yellow';
+                        ctx.fillRect(this.x, this.y + this.height * 0.1, this.width * 0.1, this.height * 0.2);
+                        ctx.fillRect(this.x + this.width * 0.9, this.y + this.height * 0.1, this.width * 0.1, this.height * 0.2);
+                    }
+                } else { // Carros NPC podem ter cores de farol diferentes ou luzes traseiras
+                    ctx.fillStyle = 'red'; // Luzes traseiras
+                    ctx.fillRect(this.x + this.width * 0.1, this.y + this.height * 0.7, this.width * 0.2, this.height * 0.15);
+                    ctx.fillRect(this.x + this.width * 0.7, this.y + this.height * 0.7, this.width * 0.2, this.height * 0.15);
+                }
+            }
+
+            update() {
+                this.x += this.speedX;
+                // Limitar o movimento do jogador à área da pista
+                const roadX = gameWidth * (1 - roadWidthMultiplier) / 2;
+                const actualRoadWidth = gameWidth * roadWidthMultiplier;
+                if (this.x < roadX + roadShoulderWidth * gameWidth) {
+                    this.x = roadX + roadShoulderWidth * gameWidth;
+                }
+                if (this.x + this.width > roadX + actualRoadWidth - roadShoulderWidth * gameWidth) {
+                    this.x = roadX + actualRoadWidth - roadShoulderWidth * gameWidth - this.width;
+                }
+            }
+        }
+
+        class Obstacle extends Car {
+            constructor(x, y, width, height, color) {
+                super(x, y, width, height, color, false); // isPlayer = false
+                this.passed = false; // Para contar pontos
+            }
+
+            update() {
+                this.y += gameSpeed; // Obstáculos se movem em direção ao jogador
+            }
+        }
+
+        class RoadLine {
+            constructor(x, y, width, height, color) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+                this.color = color;
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+
+            update() {
+                this.y += gameSpeed;
+                if (this.y > gameHeight) {
+                    this.y = -this.height; // Reposiciona no topo
+                }
+            }
+        }
+
+        // --- Funções do Jogo ---
+        function initGame() {
+            score = 0;
+            gameSpeed = baseSpeed;
+            obstacles = [];
+            roadLines = [];
+            currentEnvironment = 'green';
+            environmentTimer = 0;
+            environmentDisplay.textContent = getEnvironmentName(currentEnvironment);
+
+
+            const carWidth = Math.max(30, gameWidth * 0.08); // Largura do carro responsiva
+            const carHeight = Math.max(50, gameHeight * 0.1); // Altura do carro responsiva
+
+            playerCar = new Car(
+                gameWidth / 2 - carWidth / 2,
+                gameHeight - carHeight - 20, // Posição inicial na parte inferior
+                carWidth,
+                carHeight,
+                '#ff5252' // Vermelho vibrante para o jogador
+            );
+
+            // Inicializar linhas da estrada
+            const roadX = gameWidth * (1 - roadWidthMultiplier) / 2;
+            const actualRoadWidth = gameWidth * roadWidthMultiplier;
+            const lineWidth = Math.max(3, gameWidth * 0.01);
+            const lineHeight = Math.max(20, gameHeight * 0.05);
+            const lineGap = Math.max(20, gameHeight * 0.05);
+
+            for (let i = 0; i < Math.ceil(gameHeight / (lineHeight + lineGap)); i++) {
+                roadLines.push(new RoadLine(
+                    roadX + actualRoadWidth / 2 - lineWidth / 2,
+                    i * (lineHeight + lineGap),
+                    lineWidth,
+                    lineHeight,
+                    '#FFFFFF' // Linhas brancas
+                ));
+            }
+
+            gameOverMessage.style.display = 'none';
+            startMessage.style.display = 'none';
+            gameRunning = true;
+            gameLoop();
+        }
+
+        function spawnObstacle() {
+            // Lógica para gerar obstáculos (outros carros)
+            const minGap = playerCar.height * 3; // Espaço mínimo entre obstáculos
+            const lastObstacle = obstacles[obstacles.length - 1];
+            if (obstacles.length === 0 || (lastObstacle && lastObstacle.y > minGap && Math.random() < 0.02 * (gameSpeed / baseSpeed))) { // Chance aumenta com a velocidade
+                const obsWidth = Math.max(30, gameWidth * 0.08);
+                const obsHeight = Math.max(50, gameHeight * 0.1);
+                const roadX = gameWidth * (1 - roadWidthMultiplier) / 2;
+                const actualRoadWidth = gameWidth * roadWidthMultiplier;
+
+                // Posição X aleatória dentro da pista, evitando as bordas extremas
+                const spawnableRoadWidth = actualRoadWidth - (2 * roadShoulderWidth * gameWidth) - obsWidth;
+                const randomX = roadX + (roadShoulderWidth * gameWidth) + Math.random() * spawnableRoadWidth;
+
+                const colors = ['#42a5f5', '#ffee58', '#ab47bc', '#26a69a', '#ffa726']; // Azul, Amarelo, Roxo, Verde-água, Laranja
+                const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+                obstacles.push(new Obstacle(randomX, -obsHeight, obsWidth, obsHeight, randomColor));
+            }
+        }
+
+        function updateGame() {
+            if (!gameRunning) return;
+
+            // Aumentar a velocidade gradualmente
+            if (gameSpeed < maxSpeed) {
+                gameSpeed += acceleration;
+            }
+
+            playerCar.update();
+
+            // Atualizar linhas da estrada
+            roadLines.forEach(line => line.update());
+
+            // Atualizar obstáculos
+            spawnObstacle();
+            obstacles.forEach((obstacle, index) => {
+                obstacle.update();
+                // Remover obstáculos que saíram da tela
+                if (obstacle.y > gameHeight) {
+                    obstacles.splice(index, 1);
+                }
+
+                // Contar pontos ao passar por um obstáculo (simplificado)
+                if (!obstacle.passed && obstacle.y > playerCar.y + playerCar.height) {
+                    score += 10;
+                    obstacle.passed = true;
+                }
+
+                // Detecção de colisão
+                if (
+                    playerCar.x < obstacle.x + obstacle.width &&
+                    playerCar.x + playerCar.width > obstacle.x &&
+                    playerCar.y < obstacle.y + obstacle.height &&
+                    playerCar.y + playerCar.height > obstacle.y
+                ) {
+                    gameOver();
+                }
+            });
+
+            // Atualizar displays
+            scoreDisplay.textContent = score;
+            speedDisplay.textContent = Math.floor(gameSpeed * 20); // Fator de conversão para km/h
+
+            // Lógica de mudança de ambiente
+            environmentTimer++;
+            if (environmentTimer >= environmentDuration) {
+                changeEnvironment();
+                environmentTimer = 0;
+            }
+        }
+
+        function getEnvironmentName(envKey) {
+            switch(envKey) {
+                case 'green': return 'Pista Verde';
+                case 'rain': return 'Chuva Forte';
+                case 'fog': return 'Neblina Densa';
+                case 'desert': return 'Deserto Árido';
+                case 'night': return 'Noite Escura';
+                default: return 'Desconhecido';
+            }
+        }
+
+        function changeEnvironment() {
+            const environments = ['green', 'rain', 'fog', 'desert', 'night'];
+            let currentIndex = environments.indexOf(currentEnvironment);
+            currentIndex = (currentIndex + 1) % environments.length;
+            currentEnvironment = environments[currentIndex];
+            environmentDisplay.textContent = getEnvironmentName(currentEnvironment);
+
+            // Ajustes específicos do ambiente (placeholder)
+            // Ex: Reduzir visibilidade na neblina, mudar cores do céu/pista
+            console.log("Mudando para ambiente:", currentEnvironment);
+        }
+
+        function drawBackground() {
+            // Desenha o céu e a grama/acostamento
+            let skyColor, roadColor, shoulderColor;
+
+            switch (currentEnvironment) {
+                case 'rain':
+                    skyColor = '#546e7a'; // Cinza azulado escuro
+                    roadColor = '#424242'; // Cinza escuro para asfalto molhado
+                    shoulderColor = '#388e3c'; // Verde escuro para grama molhada
+                    break;
+                case 'fog':
+                    skyColor = '#bdbdbd'; // Cinza claro para neblina
+                    roadColor = '#616161'; // Cinza médio
+                    shoulderColor = '#689f38'; // Verde oliva
+                    break;
+                case 'desert':
+                    skyColor = '#ffcc80'; // Laranja claro (pôr do sol no deserto)
+                    roadColor = '#bcaaa4'; // Bege/marrom claro para areia/terra
+                    shoulderColor = '#d7ccc8'; // Areia mais clara
+                    break;
+                case 'night':
+                    skyColor = '#263238'; // Azul muito escuro (quase preto)
+                    roadColor = '#37474f'; // Cinza bem escuro
+                    shoulderColor = '#1b5e20'; // Verde muito escuro
+                    break;
+                case 'green':
+                default:
+                    skyColor = '#87CEEB'; // Azul céu
+                    roadColor = '#606060'; // Cinza para a estrada
+                    shoulderColor = '#4CAF50'; // Verde para o acostamento
+                    break;
+            }
+
+            // Céu
+            ctx.fillStyle = skyColor;
+            ctx.fillRect(0, 0, gameWidth, gameHeight / 2);
+
+            // Acostamento/Grama/Deserto
+            ctx.fillStyle = shoulderColor;
+            ctx.fillRect(0, gameHeight / 2, gameWidth, gameHeight / 2);
+
+            // Estrada
+            const roadX = gameWidth * (1 - roadWidthMultiplier) / 2;
+            const actualRoadWidth = gameWidth * roadWidthMultiplier;
+            ctx.fillStyle = roadColor;
+            ctx.fillRect(roadX, 0, actualRoadWidth, gameHeight);
+
+            // Linhas de acostamento (brancas ou amarelas dependendo do padrão)
+            const shoulderLineColor = (currentEnvironment === 'desert' || currentEnvironment === 'night') ? '#FDD835' : '#FFFFFF'; // Amarelo para deserto/noite
+            ctx.fillStyle = shoulderLineColor;
+            // Linha esquerda do acostamento
+            ctx.fillRect(roadX + (roadShoulderWidth * gameWidth * 0.2), 0, Math.max(2, gameWidth*0.005), gameHeight);
+            // Linha direita do acostamento
+            ctx.fillRect(roadX + actualRoadWidth - (roadShoulderWidth * gameWidth * 0.2) - Math.max(2, gameWidth*0.005), 0, Math.max(2, gameWidth*0.005), gameHeight);
+        }
+
+
+        function drawParticles() {
+            if (currentEnvironment === 'rain') {
+                ctx.fillStyle = 'rgba(173, 216, 230, 0.7)'; // Azul claro para chuva
+                for (let i = 0; i < 50; i++) { // Número de gotas de chuva
+                    const x = Math.random() * gameWidth;
+                    const y = Math.random() * gameHeight;
+                    const length = Math.random() * 15 + 5; // Comprimento da gota
+                    ctx.fillRect(x, y, 1, length); // Gotas finas
+                }
+            } else if (currentEnvironment === 'fog') {
+                ctx.fillStyle = 'rgba(200, 200, 200, 0.15)'; // Camada de neblina sutil
+                ctx.fillRect(0, 0, gameWidth, gameHeight);
+            } else if (currentEnvironment === 'night') {
+                // Estrelas
+                ctx.fillStyle = 'white';
+                for (let i = 0; i < 100; i++) { // Número de estrelas
+                    if (Math.random() > 0.95) { // Algumas estrelas piscam ou são maiores
+                         const x = Math.random() * gameWidth;
+                         const y = Math.random() * (gameHeight / 2); // Apenas no céu
+                         const size = Math.random() * 2 + 0.5;
+                         ctx.beginPath();
+                         ctx.arc(x, y, size, 0, Math.PI * 2);
+                         ctx.fill();
+                    }
+                }
+            }
+        }
+
+
+        function drawGame() {
+            if (!gameRunning && gameOverMessage.style.display === 'none' && startMessage.style.display === 'none') {
+                 // Se o jogo não está rodando e nenhuma mensagem está ativa, mostra a de início
+                startMessage.style.display = 'block';
+                return;
+            }
+            if (!gameRunning) return;
+
+
+            // Limpar o canvas
+            ctx.clearRect(0, 0, gameWidth, gameHeight);
+
+            // Desenhar fundo (céu, estrada, acostamento)
+            drawBackground();
+
+            // Desenhar linhas da estrada
+            roadLines.forEach(line => line.draw());
+
+            // Desenhar obstáculos
+            obstacles.forEach(obstacle => obstacle.draw());
+
+            // Desenhar carro do jogador
+            playerCar.draw();
+
+            // Desenhar partículas (chuva, neblina, estrelas)
+            drawParticles();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            finalScoreDisplay.textContent = score;
+            gameOverMessage.style.display = 'block';
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+            updateGame();
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Controles ---
+        function handleKeyDown(e) {
+            // Allow starting the game with Enter or Space key if on start/game over screen
+            if ((e.key === 'Enter' || e.key === ' ') && !gameRunning) {
+                if (startMessage.style.display === 'block' || gameOverMessage.style.display === 'block') {
+                    initGame();
+                    return;
+                }
+            }
+
+            if (!gameRunning) return; // Prevent car movement if game is not running
+
+            if (e.key === 'ArrowLeft') {
+                playerCar.speedX = -playerCar.maxSpeedX;
+            } else if (e.key === 'ArrowRight') {
+                playerCar.speedX = playerCar.maxSpeedX;
+            }
+        }
+
+        function handleKeyUp(e) {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                playerCar.speedX = 0;
+            }
+        }
+
+        // --- Controles de Toque ---
+        function handleTouchStart(e) {
+            if (!gameRunning) return;
+            e.preventDefault(); // Prevenir scroll/zoom
+            const touchX = e.touches[0].clientX;
+            const gameCanvasRect = canvas.getBoundingClientRect(); // Pega a posição do canvas na tela
+
+            // Calcula a posição do toque relativa ao canvas
+            const relativeTouchX = touchX - gameCanvasRect.left;
+
+            if (relativeTouchX < gameCanvasRect.width / 2) { // Toque na metade esquerda
+                playerCar.speedX = -playerCar.maxSpeedX;
+            } else { // Toque na metade direita
+                playerCar.speedX = playerCar.maxSpeedX;
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (!gameRunning) return;
+            e.preventDefault();
+            playerCar.speedX = 0;
+        }
+
+        // --- Responsividade ---
+        function resizeCanvas() {
+            // Ajustar o tamanho do canvas para preencher uma porção da tela, mantendo proporção
+            const aspectRatio = 9 / 16; // Proporção vertical (mais comum para jogos mobile-like)
+            const container = document.getElementById('gameContainer');
+
+            let newWidth = window.innerWidth * 0.9; // 90% da largura da janela
+            let newHeight = window.innerHeight * 0.7; // 70% da altura da janela
+
+            // Manter a proporção
+            if (newWidth / newHeight > aspectRatio) { // Se mais largo que a proporção
+                newWidth = newHeight * aspectRatio;
+            } else { // Se mais alto
+                newHeight = newWidth / aspectRatio;
+            }
+
+            // Limitar ao tamanho máximo para não ficar gigante em desktops
+            newWidth = Math.min(newWidth, 600);
+            newHeight = Math.min(newHeight, 800);
+
+
+            canvas.width = newWidth;
+            canvas.height = newHeight;
+            container.style.width = `${newWidth}px`;
+            container.style.height = `${newHeight}px`;
+
+            gameWidth = canvas.width;
+            gameHeight = canvas.height;
+
+            // Note: Resizing the canvas currently resets the game state.
+            // For a more advanced implementation, game elements would need to be
+            // dynamically repositioned and rescaled without restarting the game.
+            if (gameRunning) {
+                 gameOver(); // Shows the game over message
+            } else if (gameOverMessage.style.display !== 'block') {
+                // Only draw start screen if not already on game over screen
+                drawStartScreen();
+            }
+
+            // Update player car dimensions and position if it exists
+            if(playerCar) {
+                const carWidth = Math.max(30, gameWidth * 0.08);
+                const carHeight = Math.max(50, gameHeight * 0.1);
+                playerCar.width = carWidth;
+                playerCar.height = carHeight;
+                playerCar.x = gameWidth / 2 - carWidth / 2;
+                playerCar.y = gameHeight - carHeight - 20;
+            }
+        }
+
+        function drawStartScreen() {
+            ctx.clearRect(0, 0, gameWidth, gameHeight);
+            drawBackground(); // Desenha um fundo padrão
+            // A mensagem de início já é um elemento HTML, então não precisa ser desenhada no canvas
+            // Apenas garante que o canvas tenha um fundo
+        }
+
+
+        // --- Inicialização ---
+        window.addEventListener('resize', resizeCanvas);
+        document.addEventListener('keydown', handleKeyDown);
+        document.addEventListener('keyup', handleKeyUp);
+
+        // Adiciona ouvintes de eventos de toque
+        canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+        canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+        // Botões de controle mobile
+        // Check for touch device to display mobile controls
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            mobileControls.style.display = 'flex';
+            // Use 'mousedown' and 'mouseup' for broader compatibility with touch and mouse clicks on buttons
+            moveLeftButton.addEventListener('mousedown', (e) => { e.preventDefault(); if(gameRunning) playerCar.speedX = -playerCar.maxSpeedX; });
+            moveLeftButton.addEventListener('mouseup', (e) => { e.preventDefault(); if(gameRunning) playerCar.speedX = 0; });
+            moveRightButton.addEventListener('mousedown', (e) => { e.preventDefault(); if(gameRunning) playerCar.speedX = playerCar.maxSpeedX; });
+            moveRightButton.addEventListener('mouseup', (e) => { e.preventDefault(); if(gameRunning) playerCar.speedX = 0; });
+        }
+
+
+        restartButton.addEventListener('click', initGame);
+        startButton.addEventListener('click', initGame);
+
+        // Configuração inicial do canvas e início do jogo
+        resizeCanvas(); // Chama para definir o tamanho inicial
+        drawStartScreen(); // Desenha a tela inicial
+    </script>
+</body>
+</html>
